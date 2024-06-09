@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque, defaultdict
-from itertools import zip_longest
+from operator import eq, itemgetter
 from typing import Any, Hashable, Iterable, Iterator, Optional, Protocol, Self, overload, Union, MutableMapping
 
 
@@ -10,6 +10,8 @@ _DESYNCED_ERROR_MSG: str = f"OrderedMultiDict._items and OrderedMultiDict._map h
 _EMPTY_DEQUE_ERROR_MSG: str = f"OrderedMultiDict._map contained an empty deque. OrderedMultiDict._items and OrderedMultiDict._map might have de-synced. {_BUGREPORT_MSG}"
 
 _SENTINEL = object()
+_SENTINEL2 = object()
+
 
 class _SupportsKeysAndGetItem[TK: Hashable, TV](Protocol):
 	def keys(self) -> Iterable[TK]: ...
@@ -23,6 +25,13 @@ def _pop_first[TK: Hashable, TV](d: dict[TK, TV]) -> tuple[TK, TV]:
 def _pop_last[TK: Hashable, TV](d: dict[TK, TV]) -> tuple[TK, TV]:
 	return d.popitem()
 
+
+def _iter_keys[TK](values: Iterable[tuple[TK, Any]]) -> Iterator[TK]:
+	return map(itemgetter(0), values)
+
+
+def _iter_values[TV](values: Iterable[tuple[Any, TV]]) -> Iterator[TV]:
+	return map(itemgetter(1), values)
 
 
 class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
@@ -93,14 +102,42 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 
 	def _update(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
 		if hasattr(iterable_or_map, 'items'):
-			for k, v in iterable_or_map.items():
-				self.add(k, v)
+			self._update_fast(iterable_or_map.items())
 		elif hasattr(iterable_or_map, 'keys'):
 			for k, in iterable_or_map.keys():
 				self.add(k, iterable_or_map[k])
+		elif hasattr(iterable_or_map, '__len__'):
+			self._update_fast(iterable_or_map)
 		else:
-			for k, v in iterable_or_map:
-				self.add(k, v)
+			self._update_slow(iterable_or_map)
+
+	def _update_fast(self, items) -> None:
+		index: int = self._index
+		self._index += len(items)
+		self._items.update(enumerate(items, index))
+
+		s_map = self._map
+		for item in items:
+			s_map[item[0]].append((index, item[1]))  # entry in _map is created here if necessary, because _map is a defaultdict
+			index += 1
+
+	def _update_slow(self, items) -> None:
+		index: int = self._index
+
+		s_map = self._map
+		s_items = self._items
+		try:
+			for item in items:
+				# Split herre, so we are sure that item can be split into exactly two items,
+				# before we start to update any internal state. This avoids leaving the
+				# OrderedMultiDict in an invalid state if item cannot be split.
+				k, v = item
+				# entry in _map is created here if necessary, because _map is a defaultdict
+				s_map[k].append((index, v))
+				s_items[index] = item
+				index += 1
+		finally:
+			self._index = index
 
 	def _copy_from(self, others: OrderedMultiDict[TK, TV]) -> Self:
 		self._items = others._items.copy()
@@ -192,8 +229,8 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		Returns: List of <key>'s values if <key> exists in the dictionary,
 		otherwise <defaultlist>.
 		"""
-		if (self._get_all_or_none(key)) is not None:  # if key in self:
-			return self.getall(key)
+		if (values := self.getall(key, _SENTINEL2)) is not _SENTINEL2:
+			return values
 		self.addall(key, defaultlist)
 		return defaultlist
 
@@ -207,20 +244,20 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		dictionary, then <value> is added as the sole value for <key>.
 
 		Example:
-			omd = OrderedMultiDict()
-			omd.add(1, 1)   # list(omd.items()) == [(1,1)]
-			omd.add(1, 11)  # list(omd.items()) == [(1,1), (1,11)]
-			omd.add(2, 2)   # list(omd.items()) == [(1,1), (1,11), (2,2)]
-			omd.add(1, 111) # list(omd.items()) == [(1,1), (1,11), (2,2), (1, 111)]
+			>>> omd = OrderedMultiDict()
+			>>> omd.add(1, 1)   # list(omd.items()) == [(1,1)]
+			>>> omd.add(1, 11)  # list(omd.items()) == [(1,1), (1,11)]
+			>>> omd.add(2, 2)   # list(omd.items()) == [(1,1), (1,11), (2,2)]
+			>>> omd.add(1, 111) # list(omd.items()) == [(1,1), (1,11), (2,2), (1, 111)]
 
 		Returns: <self>.
 		"""
 		index: int = self._index
 		self._index += 1
 
-		values = self._map[key]  # entry in _map is created here if necessary, because _map is a defaultdict
+		# entry in _map is created here if necessary, because _map is a defaultdict:
+		self._map[key].append((index, value))
 		self._items[index] = (key, value)
-		values.append((index, value))
 
 	def addall(self, key: TK, value_list: list[TV]):
 		"""
@@ -229,15 +266,24 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		for <key>.
 
 		Example:
-			omd = OrderedMultiDict([(1,1)])
-			omd.addAll(1, [11, 111]) # list(omd.items()) == [(1, 1), (1, 11), (1, 111)]
-			omd.addAll(2, [2])       # list(omd.items()) == [(1, 1), (1, 11), (1, 111), (2, 2)]
-			omd.addAll(1, ['one'])   # list(omd.items()) == [(1, 1), (1, 11), (1, 111), (2, 2), (1, 'one')]
+			>>> omd: OrderedMultiDict[int, int | str] = OrderedMultiDict([(1,1)])
+			>>> omd.addall(1, [11, 111]) # list(omd.items()) == [(1, 1), (1, 11), (1, 111)]
+			>>> omd.addall(2, [2])       # list(omd.items()) == [(1, 1), (1, 11), (1, 111), (2, 2)]
+			>>> omd.addall(1, ['one'])   # list(omd.items()) == [(1, 1), (1, 11), (1, 111), (2, 2), (1, 'one')]
 
 		Returns: <self>.
 		"""
 		for value in value_list:
 			self.add(key, value)
+		# todo: following implementation might faster:
+		# index: int = self._index
+		# self._index += len(value_list)
+		# self._map[key].extend(enumerate(value_list, index))
+		#
+		# values = self._items[key]
+		# for value in value_list:
+		# 	values[index]((key, value))  # entry in _map is created here if necessary, because _map is a defaultdict
+		# 	index += 1
 
 	@overload
 	def popall(self, key: TK, /) -> Union[list[TV]]:
@@ -247,11 +293,12 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		<default> is not provided and <key> is not in the dictionary.
 
 		Example:
-			omd = OrderedMultiDict([(1,1), (1,11), (1,111), (2,2), (3,3)])
-			omd.poplist(1) == [1, 11, 111]
-			omd.allitems() == [(2,2), (3,3)]
-			omd.poplist(2) == [2]
-			omd.allitems() == [(3,3)]
+			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3), (1,111)])
+			>>> print(omd.popall(2))  # [2, 22]
+			>>> print(omd.items())    # _ItemsView([(1, 1), (1, 11), (3,3), (1, 111)])
+			>>> print(omd.popall(1))  # [1, 11, 111]
+			>>> print(omd.items())    # _ItemsView([(3,3)])
+			>>> omd.popall(1)         # raises KeyError
 
 		Raises: KeyError if <key> is absent in the dictionary and <default> isn't
 			provided.
@@ -267,11 +314,12 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		<default> is not provided and <key> is not in the dictionary.
 
 		Example:
-			omd = OrderedMultiDict([(1,1), (1,11), (1,111), (2,2), (3,3)])
-			omd.poplist(1) == [1, 11, 111]
-			omd.allitems() == [(2,2), (3,3)]
-			omd.poplist(2) == [2]
-			omd.allitems() == [(3,3)]
+			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3), (1,111)])
+			>>> print(omd.popall(2, None))  # [2, 22]
+			>>> print(omd.items())          # _ItemsView([(1, 1), (1, 11), (3,3), (1, 111)])
+			>>> print(omd.popall(1, None))  # [1, 11, 111]
+			>>> print(omd.items())          # _ItemsView([(3,3)])
+			>>> print(omd.popall(1, None))  # None
 
 		Raises: KeyError if <key> is absent in the dictionary and <default> isn't
 			provided.
@@ -286,17 +334,16 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		<default> is not provided and <key> is not in the dictionary.
 
 		Example:
-			omd = OrderedMultiDict([(1,1), (1,11), (1,111), (2,2), (3,3)])
-			omd.poplist(1) == [1, 11, 111]
-			omd.allitems() == [(2,2), (3,3)]
-			omd.poplist(2) == [2]
-			omd.allitems() == [(3,3)]
+			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3), (1,111)])
+			>>> print(omd.popall(2))  # [2, 22]
+			>>> print(omd.items())    # _ItemsView([(1, 1), (1, 11), (3,3), (1, 111)])
+			>>> print(omd.popall(1))  # [1, 11, 111]
+			>>> print(omd.items())    # _ItemsView([(3,3)])
 
 		Raises: KeyError if <key> is absent in the dictionary and <default> isn't
 			provided.
 		Returns: List of <key>'s values.
 		"""
-		# todo popAll as _popSomething
 		if (values := self._get_all_or_none(key)) is not None:  # if key in self:
 			# we might be able to improve performance a little bit here...
 			result = []
@@ -413,15 +460,15 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 			return default
 		raise KeyError(key)
 
-	def delete_all(self, key: TK):
+	def delete_all(self, key: TK) -> None:
 		"""
 		Removes all entries for key. Raises a KeyError if key is not in the dictionary.
 
 		Example:
-			omd = OrderedMultiDict([(1,1), (1,11), (1,111), (2,2), (3,3)])
-			omd.deleteAll(1)
-			omd.getall() == [(2,2), (3,3)]
-			omd.deleteAll(99)  # raises KeyError
+			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3), (1,111)])
+			>>> omd.delete_all(1)
+			>>> print(omd.items())  # _ItemsView([(2,2), (3,3)])
+			>>> omd.delete_all(99)  # raises KeyError
 		"""
 		if not self._try_delete_all(key):
 			raise KeyError(key)
@@ -444,8 +491,8 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		Returns: An ItemsView of all (key, value) pairs in insertion order.
 
 		Example:
-			omd = OrderedMultiDict([(1,1), (1,11), (2,2), (1,111)])
-			print(list(omd.items()))  # prints [(1,1), (1,11), (2,2), (1,111)]
+			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3), (1,111)])
+			>>> print(omd.items())  # _ItemsView([(1,1), (2,2), (1,11), (2, 22), (3,3), (1,111)])
 		"""
 		return _ItemsView(self)
 
@@ -454,8 +501,8 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		Returns: A KeysView of all keys in insertion order. Keys can appear multiple times.
 
 		Example:
-			omd = OrderedMultiDict([(1,1), (1,11), (2,2), (1,111)])
-			print(list(omd.keys()))  # prints [1, 1, 2, 1]
+			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3), (1,111)])
+			>>> print(omd.keys())  # _KeysView([1, 2, 1, 2, 3, 1])
 		"""
 		return _KeysView(self)
 
@@ -464,8 +511,8 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		Returns: A KeysView of all unique keys in order of first appearance. Keys only appear once.
 
 		Example:
-			omd = OrderedMultiDict([(1,1), (1,11), (2,2), (1,111)])
-			print(list(omd.uniqueKeys()))  # prints [1, 2]
+			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3), (1,111)])
+			>>> print(omd.unique_keys())  # _UniqueKeysView([1, 2, 3])
 		"""
 		return _UniqueKeysView(self)
 
@@ -474,8 +521,8 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		Returns: A ValuesView of all values in insertion order.
 
 		Example:
-			omd = OrderedMultiDict([(1,1), (1,11), (2,2), (1,111)])
-			print(list(omd.keys()))  # prints [1, 11, 2, 111]
+			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3), (1,111)])
+			>>> print(omd.values())  # _ValuesView([1, 2, 11, 22, 3, 111])
 		"""
 		return _ValuesView(self)
 
@@ -484,13 +531,21 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 	# 	todo: update self._map
 	# 	self._index = len(self._items)
 
+	def contains_item(self, key: TK, value: TV) -> bool:
+		if (values := self._get_all_or_none(key)) is not None:
+			return value in _iter_values(values)
+		return False
+
+	def contains_value(self, value: TV) -> bool:
+		# the same implementation as in _ValuesView.__contains__()
+		return value in _iter_values(self._items.values())
+
 	def __eq__(self, other) -> bool:
 		if type(self) is not type(other):
 			return NotImplemented
-		for i1, i2 in zip_longest(self.items(), other.items(), fillvalue=_SENTINEL):
-			if i1 != i2 or i1 is _SENTINEL or i2 is _SENTINEL:
-				return False
-		return True
+		if len(self) != len(other):
+			return False
+		return all(map(eq, self._items.values(), other._items.values()))
 
 	def __ne__(self, other) -> bool:
 		return not self.__eq__(other)
@@ -538,15 +593,27 @@ class _ViewBase[TK: Hashable, TV]:
 		self._items = impl._items.values()
 
 	def __len__(self):
-		return self._impl.__len__()
+		return self._items.__len__()
+
+	def __iter__(self) -> Iterator[Any]:
+		raise NotImplementedError(f"{type(self).__name__}.__iter__()")
+
+	def __reversed__(self) -> Iterator[Any]:
+		raise NotImplementedError(f"{type(self).__name__}.__reversed__()")
+
+	def __repr__(self):
+		return f'{type(self).__name__}({list(self)})'
 
 
 class _ItemsView[TK: Hashable, TV](_ViewBase[TK, TV]):
 
+	def __init__(self, impl: OrderedMultiDict[TK, TV]):
+		super().__init__(impl)
+
 	def __contains__(self, item: tuple[TK, TV]) -> bool:
-		assert isinstance(item, tuple) or isinstance(item, list)
-		assert len(item) == 2
-		return item[1] in self._impl.getall(item[0])
+		if not isinstance(item, tuple) or len(item) != 2:
+			return False
+		return self._impl.contains_item(*item)
 
 	def __iter__(self) -> Iterator[tuple[TK, TV]]:
 		return iter(self._items)
@@ -554,38 +621,17 @@ class _ItemsView[TK: Hashable, TV](_ViewBase[TK, TV]):
 	def __reversed__(self) -> Iterator[tuple[TK, TV]]:
 		return reversed(self._items)
 
-	def __repr__(self):
-		lst = []
-		for item in self._items:
-			lst.append(f"{item[0]!r}: {item[1]!r}")
-		body = ', '.join(lst)
-		return f'{self.__class__.__name__}({body})'
-
 
 class _ValuesView[TV](_ViewBase[Any, TV]):
 
 	def __contains__(self, value: TV) -> bool:
-		for item in self._items:
-			if item[1] == value:
-				return True
-		return False
+		return value in _iter_values(self._items)
 
 	def __iter__(self) -> Iterator[TV]:
-		# return (v[1] for v in self._impl._items.values())
-		for _, v in self._items:
-			yield v
+		return _iter_values(self._items)
 
 	def __reversed__(self) -> Iterator[TV]:
-		# return (v[1] for v in reversed(self._impl._items.values()))
-		for _, v in reversed(self._items):
-			yield v
-
-	def __repr__(self):
-		lst = []
-		for item in self._items:
-			lst.append(f"{item[1]!r}")
-		body = ', '.join(lst)
-		return f'{self.__class__.__name__}({body})'
+		return _iter_values(reversed(self._items))
 
 
 class _KeysView[TK: Hashable](_ViewBase[TK, Any]):
@@ -594,17 +640,10 @@ class _KeysView[TK: Hashable](_ViewBase[TK, Any]):
 		return self._impl.__contains__(key)
 
 	def __iter__(self) -> Iterator[TK]:
-		return (k for k, _ in self._items)
+		return _iter_keys(self._items)
 
 	def __reversed__(self) -> Iterator[TK]:
-		return (k for k, _ in reversed(self._items))
-
-	def __repr__(self):
-		lst = []
-		for item in self._items:
-			lst.append(f"{item[0]!r}")
-		body = ', '.join(lst)
-		return f'{self.__class__.__name__}({body})'
+		return _iter_keys(reversed(self._items))
 
 
 class _UniqueKeysView[TK: Hashable](_ViewBase[TK, Any]):
@@ -614,20 +653,11 @@ class _UniqueKeysView[TK: Hashable](_ViewBase[TK, Any]):
 
 	def __iter__(self) -> Iterator[TK]:
 		# we cannot iterate over self._impl._map, because its order might not be up-to-date.
-		already_seen: set = set()
-		return (k for k, _ in self._items if k not in already_seen and not already_seen.add(k))
+		return iter(dict.fromkeys(_iter_keys(self._items)))
 
 	def __reversed__(self) -> Iterator[TK]:
 		# we cannot iterate over self._impl._map, because its order might not be up-to-date.
-		already_seen: set = set()
-		return (k for k, _ in reversed(self._items) if k not in already_seen and not already_seen.add(k))
-
-	def __repr__(self):
-		lst = []
-		for key in self:
-			lst.append(f"{key!r}")
-		body = ', '.join(lst)
-		return f'{self.__class__.__name__}({body})'
+		return reversed(dict.fromkeys(_iter_keys(self._items)))
 
 	def __len__(self):
 		return len(self._impl._map)
