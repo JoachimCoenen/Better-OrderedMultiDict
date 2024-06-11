@@ -2,20 +2,20 @@
 
 ![License](https://img.shields.io/github/license/JoachimCoenen/Better-OrderedMultiDict)
 ![GitHub repo size](https://img.shields.io/github/repo-size/JoachimCoenen/Better-OrderedMultiDict?color=0072FF)
-[![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2FJoachimCoenen%2FBetter-OrderedMultiDict&count_bg=%230072FF&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false)](https://hits.seeyoufarm.com)
-[![package version](https://badge.fury.io/py/better_orderedmultidict.svg)](https://pypi.python.org/pypi/better_orderedmultidict)
-[![supported python versions](https://img.shields.io/pypi/pyversions/better_orderedmultidict.svg)](https://pypi.python.org/pypi/better_orderedmultidict)
+![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2FJoachimCoenen%2FBetter-OrderedMultiDict&count_bg=%230072FF&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false)
+[![PyPI version](https://badge.fury.io/py/better-orderedmultidict.svg)](https://badge.fury.io/py/better-orderedmultidict)
+[![PyPI - Python Versions](https://img.shields.io/pypi/pyversions/Better-OrderedMultiDict?color=0072FF)](https://pypi.python.org/pypi/better_orderedmultidict)
   <!-- <a href="https://pypi.python.org/pypi/better_orderedmultidict"><img src="https://badge.fury.io/py/better_orderedmultidict.svg"></a> -->
   <!-- <img src="https://img.shields.io/pypi/l/better_orderedmultidict.svg"> -->
   <!--<a href="https://pypi.python.org/pypi/better_orderedmultidict"><img src="https://img.shields.io/pypi/pyversions/better_orderedmultidict.svg"></a>-->
 
-<!-- TOC -->
+<!-- TOC 
   * [Overview](#overview)
   * [Differences to omdict](#differences-to-omdict)
   * [Performance Comparison](#performance-comparison)
   * [Examples](#examples)
   * [Installation](#installation)
-<!-- TOC -->
+ TOC -->
 
 ## Overview
 
