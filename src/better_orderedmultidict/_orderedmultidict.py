@@ -213,7 +213,7 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 
 	def setdefault(self, key: TK, /, default: TV) -> TV:
 		if (values := self._get_all_or_none(key)) is not None:  # if key in self:
-			return values[0][1]
+			return values[-1][1]
 		self.add(key, default)
 		return default
 
