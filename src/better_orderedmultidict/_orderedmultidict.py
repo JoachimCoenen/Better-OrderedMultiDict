@@ -385,10 +385,10 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 	def _popitem[TT](self, default: TT, *, last: bool) -> tuple[TK, TV] | TT:
 		try:
 			item = (_pop_last(self._items) if last else _pop_first(self._items))[1]
-		except KeyError:
+		except (StopIteration, KeyError):
 			if default is not _SENTINEL:
 				return default
-			raise
+			raise KeyError("dictionary is empty") from None
 
 		values = self._get_all_or_none(item[0])
 		assert values is not None, _DESYNCED_ERROR_MSG
