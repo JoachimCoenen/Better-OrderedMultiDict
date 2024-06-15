@@ -49,12 +49,12 @@ Better OrderedMultiDict requires Python 3.12+ and is fully type annotated.
     from better_orderedmultidict import OrderedMultiDict
     from orderedmultidict import omdict
     items = [(1, 1), (1, 11), (1, 111)]
-    print(list(omdict(items).values()))           # prints [111]
+    print(list(omdict(items).values()))           # prints [111] (where have the other two values gone?)
     print(list(OrderedMultiDict(items).values())) # prints [1, 11, 111]
     ```
   * `OrderedMultiDict` is faster:  
     * Initialization from a list is up to **2.5x faster**.  
-    * Iterating over _all_ values is between **3.8x and 6.9x faster**. 
+    * Iterating over _all_ values is about **4x faster**. 
     * For a more detailed performance comparison see the [Performance Comparison](#performance-comparison) section.
   * But `OrderedMultiDict` does not retain full method parity with `dict`, so it can not be used as a drop-in replacement.
 
@@ -63,24 +63,43 @@ Better OrderedMultiDict requires Python 3.12+ and is fully type annotated.
 ## Performance Comparison
 Creating / iterating over dictionary with 500'000 entries with all keys being different:
 
-|                          | Better <br/>OrderedMultiDict |    omdict | OrderedDict |
-|--------------------------|-----------------------------:|----------:|------------:|
-| create                   |                    527.74 ms | 579.80 ms |    82.10 ms |
-| iterate over items       |                     20.19 ms |  95.60 ms |    39.49 ms |
-| iterate over values      |                     20.37 ms |  77.96 ms |    31.64 ms |
-| iterate over keys        |                     20.32 ms |  77.27 ms |    22.18 ms |
-| iterate over unique keys |                     53.24 ms |  35.41 ms |    21.77 ms |
+|                                 | OrderedMultiDict |    omdict |       speedup |
+|---------------------------------|-----------------:|----------:|--------------:|
+| create                          |        496.44 ms | 554.75 ms |          1.1x |
+| addall / addlist                |         88.55 ms | 321.76 ms |          3.6x |
+| update / updateall<sup>1)</sup> |        400.18 ms | 546.76 ms |          1.4x |
+| copy                            |        301.60 ms | 655.58 ms |          2.2x |
+| iterate over items              |         18.51 ms |  91.58 ms |          4.9x |
+| iterate over values             |         18.51 ms |  74.17 ms |          4.0x |
+| iterate over keys               |         17.83 ms |  73.77 ms |          4.1x |
+| iterate over unique keys        |         47.33 ms |  33.68 ms | <i>slower</i> |
 
 
 Creating / iterating over dictionary with 500'000 entries, but only 100 unique keys distributed randomly:
 
-|                          | Better <br/>OrderedMultiDict |    omdict |  OrderedDict |
-|--------------------------|-----------------------------:|----------:|-------------:|
-| create                   |                    198.91 ms | 488.07 ms | ~~37.40 ms~~ |
-| iterate over items       |                     19.08 ms |  93.48 ms |  ~~0.01 ms~~ |
-| iterate over values      |                     18.52 ms | 124.64 ms |  ~~0.00 ms~~ |
-| iterate over keys        |                      9.51 ms |  65.44 ms |  ~~0.00 ms~~ |
-| iterate over unique keys |                     15.02 ms |   0.01 ms |    < 0.01 ms |
+|                                 | OrderedMultiDict |     omdict |       speedup |
+|---------------------------------|-----------------:|-----------:|--------------:|
+| create                          |        188.45 ms |  468.74 ms |          2.5x |
+| addall / addlist                |        103.47 ms |  305.90 ms |          3.0x |
+| update / updateall<sup>1)</sup> |        100.85 ms | 1465.81 ms |         14.5x |
+| copy                            |         47.14 ms |  568.60 ms |         12.1x |
+| iterate over items              |         18.18 ms |   90.75 ms |          5.0x |
+| iterate over values             |         18.41 ms |   72.72 ms |          4.0x |
+| iterate over keys               |          9.06 ms |   62.71 ms |          6.9x |
+| iterate over unique keys        |         14.74 ms |    0.01 ms | <i>slower</i> |
+
+
+1):  `omdict. updateall()` and `OrderedMultiDict.update()` have slightly different behavior for where `omdict` keeps the positions for already existing keys, but `OrderedMultiDict` does not:
+```python
+from better_orderedmultidict import OrderedMultiDict
+from orderedmultidict import omdict
+omd1 = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3)])
+omd2 = omdict([(1,1), (2,2), (1,11), (2, 22), (3,3)])
+omd1.update([(1, '1'), (3, '3'), (1, '11')])
+omd2.updateall([(1, '1'), (3, '3'), (1, '11')])
+print(list(omd1.items()))         # prints [(2, 2), (2, 22), (1, '1'), (3, '3'), (1, '11')]
+print(list(omd2.iterallitems()))  # prints [(1, '1'), (2, 2), (1, '11'), (2, 22), (3, '3')]
+```
 
 ## Examples
 
@@ -155,7 +174,7 @@ omd.pop(2)
 print(d.get(2), omd.get(2))  # prints: (None, 2)
 ```
 
-### Iterating over all keys
+### Iterating over unique keys
 
 ```python
 from better_orderedmultidict import OrderedMultiDict

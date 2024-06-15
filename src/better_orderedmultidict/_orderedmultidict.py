@@ -97,7 +97,7 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 
 		Example:
 			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3)])
-			>>> omd.update([(1, '1'), (3, '3'), (1, '11'), )   # list(omd.items()) == [(1,1)]
+			>>> omd.update([(1, '1'), (3, '3'), (1, '11')])
 			>>> print(omd.items())    # _ItemsView([(2, 2), (2, 22), (1, '1'), (3, '3'), (1, '11')])
 		"""
 
