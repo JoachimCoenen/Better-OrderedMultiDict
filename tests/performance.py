@@ -1,262 +1,289 @@
-import math
+import sys
+from os.path import dirname, join
 import random
-from collections import OrderedDict, defaultdict
-from dataclasses import dataclass
+from collections import OrderedDict
 from operator import itemgetter
-from typing import Any, Callable
+from typing import Callable
 
-from timerit import Timerit
-
-from better_orderedmultidict import OrderedMultiDict
+from bprofile import BProfile
 from orderedmultidict import omdict
 
-
-@dataclass
-class Operation:
-	label: str
-	operation: Callable[[], Any]
-
-
-@dataclass
-class SingleResult:
-	label: str
-	min: float
+try:
+	from better_orderedmultidict import OrderedMultiDict
+except ImportError:
+	sys.path.insert(0, join(dirname(dirname(__file__)), 'src'))
+	from better_orderedmultidict import OrderedMultiDict
+from performance_helper import *
 
 
-@dataclass
-class Result:
-	label: str
-	min_times: list[float]
-
-	@property
-	def min_mean(self) -> float:
-		return sum(self.min_times) / len(self.min_times)
-
-	@property
-	def min_min(self) -> float:
-		return min(self.min_times)
-
-	@property
-	def min_std(self) -> float:
-		import math
-		times = self.min_times
-		mean = self.min_mean
-		return math.sqrt(sum((t - mean) ** 2 for t in times) / len(times))
+PROFILING_DIR = join(dirname(dirname(__file__)), 'profiling')
 
 
-class TestPerformance:
-
-	@classmethod
-	def time(cls, operation: Operation, repetitions: int) -> SingleResult:
-		timerit = Timerit(repetitions, operation.label, verbose=0)
-		for timer in timerit:
-			with timer:
-				operation.operation()
-		return SingleResult(operation.label, timerit.min())
-
-	@classmethod
-	def compare_times(cls, operations: list[Operation], repetitions: int = 10, outer_repetitions: int = 2) -> dict[str, Result]:
-		orderings = [iter, reversed]
-		results = defaultdict(list)
-		for rep in range(outer_repetitions):
-			order = orderings[rep % len(orderings)]
-			for operation in order(operations):
-				res = cls.time(operation, repetitions)
-				results[operation.label].append(res.min)
-
-		return {label: Result(label, min_times) for label, min_times in results.items()}
-
-	@classmethod
-	def testCreateDict(cls, long_list: list) -> dict[str, Result]:
-		return cls.compare_times([
-			Operation("Better <br/>OrderedMultiDict", lambda: OrderedMultiDict(long_list)),
-			Operation("omdict", lambda: omdict(long_list)),
-			Operation("OrderedDict", lambda: OrderedDict(long_list)),
-		], outer_repetitions=3)
-
-	@classmethod
-	def _testIterateDict(cls, sum_dict, long_list: list) -> dict[str, Result]:
-		better_omd = OrderedMultiDict(long_list)
-		if len(better_omd) != VALUES_COUNT:
-			raise ValueError(f"expected {VALUES_COUNT} elements, but got {len(better_omd)}.")
-		omd = omdict(long_list)
-		if omd.size() != VALUES_COUNT:
-			raise ValueError(f"expected {VALUES_COUNT} elements, but got {omd.size()}.")
-		od = OrderedDict(long_list)
-
-		return cls.compare_times([
-			Operation("Better <br/>OrderedMultiDict", lambda: sum_dict(better_omd)),
-			Operation("omdict", lambda: sum_dict(omd)),
-			Operation("OrderedDict", lambda: sum_dict(od)),
-		], outer_repetitions=3)
-
-	@classmethod
-	def testIterateItems(cls, long_list: list) -> dict[str, Result]:
-		def sum_dict(dict_):
-			if isinstance(dict_, omdict):
-				total = sum(map(itemgetter(1), dict_.iterallitems()))
-			else:
-				total = sum(map(itemgetter(1), dict_.items()))
-		return cls._testIterateDict(sum_dict, long_list)
-
-	@classmethod
-	def testIterateValues(cls, long_list: list) -> dict[str, Result]:
-		def sum_dict(dict_):
-			if isinstance(dict_, omdict):
-				total = sum(dict_.iterallvalues())
-			else:
-				total = sum(dict_.values())
-		return cls._testIterateDict(sum_dict, long_list)
-
-	@classmethod
-	def testIterateKeys(cls, long_list: list) -> dict[str, Result]:
-		def sum_dict(dict_):
-			if isinstance(dict_, omdict):
-				total = sum(dict_.iterallkeys())
-			else:
-				total = sum(dict_.keys())
-		return cls._testIterateDict(sum_dict, long_list)
-
-	@classmethod
-	def testIterateUniqueKeys(cls, long_list: list) -> dict[str, Result]:
-		def sum_dict(dict_):
-			if isinstance(dict_, OrderedMultiDict):
-				total = sum(dict_.unique_keys())
-			else:
-				total = sum(dict_.keys())
-		return cls._testIterateDict(sum_dict, long_list)
+def testCreateDict(init_list: list) -> dict[str, Result]:
+	return compare_times([
+		Operation(
+			label="Better <br/>OrderedMultiDict",
+			prepare=lambda: None,
+			operation=lambda _: OrderedMultiDict(init_list)
+		),
+		Operation(
+			label="omdict",
+			prepare=lambda: None,
+			operation=lambda _: omdict(init_list)
+		),
+		# Operation(
+		# 	label="OrderedDict",
+		# 	prepare=lambda: None,
+		# 	operation=lambda _: OrderedDict(init_list)
+		# ),
+	], repetitions=5, outer_repetitions=2)
 
 
-VALUES_COUNT = 500_000
-LONG_LIST = [(i, i) for i in range(VALUES_COUNT)]
+def _testIterateDict(sum_dict, init_list: list) -> dict[str, Result]:
+	return compare_times([
+		Operation(
+			label="Better <br/>OrderedMultiDict",
+			prepare=lambda: OrderedMultiDict(init_list),
+			operation=lambda better_omd: sum_dict(better_omd),
+			check_prepared=lambda better_omd: f"expected {len(init_list)} elements, but got {len(better_omd)}." if (len(better_omd) != len(init_list)) else None
+		),
+		Operation(
+			label="omdict",
+			prepare=lambda: omdict(init_list),
+			operation=lambda omd: sum_dict(omd),
+			check_prepared=lambda omd: f"expected {len(init_list)} elements, but got {omd.size()}." if (omd.size() != len(init_list)) else None
+		),
+		# Operation(
+		# 	label="OrderedDict",
+		# 	prepare=lambda: OrderedDict(init_list),
+		# 	operation=lambda od: sum_dict(od),
+		# 	check_prepared=lambda od: None
+		# ),
+	], repetitions=5, outer_repetitions=2)
+
+
+def testIterateItems(init_list: list) -> dict[str, Result]:
+	def sum_dict(dict_):
+		if isinstance(dict_, omdict):
+			total = sum(map(itemgetter(1), dict_.iterallitems()))
+		else:
+			total = sum(map(itemgetter(1), dict_.items()))
+	return _testIterateDict(sum_dict, init_list)
+
+
+def testIterateValues(init_list: list) -> dict[str, Result]:
+	def sum_dict(dict_):
+		if isinstance(dict_, omdict):
+			total = sum(dict_.iterallvalues())
+		else:
+			total = sum(dict_.values())
+	return _testIterateDict(sum_dict, init_list)
+
+
+def testIterateKeys(init_list: list) -> dict[str, Result]:
+	def sum_dict(dict_):
+		if isinstance(dict_, omdict):
+			total = sum(dict_.iterallkeys())
+		else:
+			total = sum(dict_.keys())
+	return _testIterateDict(sum_dict, init_list)
+
+
+def testIterateUniqueKeys(init_list: list) -> dict[str, Result]:
+	def sum_dict(dict_):
+		if isinstance(dict_, OrderedMultiDict):
+			total = sum(dict_.unique_keys())
+		else:
+			total = sum(dict_.keys())
+	return _testIterateDict(sum_dict, init_list)
+
+
+def testAddAll(init_list: list) -> dict[str, Result]:
+	add_list = list(range(VALUES_COUNT // KEY_COUNT))
+	return compare_times([
+		Operation(
+			label="Better <br/>OrderedMultiDict",
+			prepare=lambda: OrderedMultiDict(init_list),
+			operation=lambda better_omd: [better_omd.addall(i, add_list) for i in range(KEY_COUNT)],
+			check_prepared=lambda better_omd: f"expected {len(init_list)} elements, but got {len(better_omd)}." if (len(better_omd) != len(init_list)) else None
+		),
+		Operation(
+			label="omdict",
+			prepare=lambda: omdict(init_list),
+			operation=lambda omd: [omd.addlist(i, add_list) for i in range(KEY_COUNT)],
+			check_prepared=lambda omd: f"expected {len(init_list)} elements, but got {omd.size()}." if (omd.size() != len(init_list)) else None
+		),
+	], repetitions=5, outer_repetitions=2)
+
+
+def testUpdate(update_list: list) -> dict[str, Result]:
+	init_list = get_long_list_common_keys(key_count=100, values_count=5_000)
+	return compare_times([
+		Operation(
+			label="Better <br/>OrderedMultiDict",
+			prepare=lambda: OrderedMultiDict(init_list),
+			operation=lambda better_omd: better_omd.update(update_list),
+			check_prepared=lambda better_omd: f"expected {len(init_list)} elements, but got {len(better_omd)}." if (len(better_omd) != len(init_list)) else None
+		),
+		Operation(
+			label="omdict",
+			prepare=lambda: omdict(init_list),
+			operation=lambda omd: omd.updateall(update_list),
+			check_prepared=lambda omd: f"expected {len(init_list)} elements, but got {omd.size()}." if (omd.size() != len(init_list)) else None
+		),
+		# Operation(
+		# 	label="OrderedDict",
+		# 	prepare=lambda: OrderedDict(init_list),
+		# 	operation=lambda od: od.update(update_list),
+		# 	check_prepared=lambda od: None
+		# ),
+	], repetitions=5, outer_repetitions=2)
+
+
+def testCopy(init_list: list) -> dict[str, Result]:
+	return compare_times([
+		Operation(
+			label="Better <br/>OrderedMultiDict",
+			prepare=lambda: OrderedMultiDict(init_list),
+			operation=lambda better_omd: better_omd.copy(),
+			check_prepared=lambda better_omd: f"expected {len(init_list)} elements, but got {len(better_omd)}." if (len(better_omd) != len(init_list)) else None
+		),
+		Operation(
+			label="omdict",
+			prepare=lambda: omdict(init_list),
+			operation=lambda omd: omd.copy(),
+			check_prepared=lambda omd: f"expected {len(init_list)} elements, but got {omd.size()}." if (omd.size() != len(init_list)) else None
+		),
+		# Operation(
+		# 	label="OrderedDict",
+		# 	prepare=lambda: OrderedDict(init_list),
+		# 	operation=lambda od: od.update(update_list),
+		# 	check_prepared=lambda od: None
+		# ),
+	], repetitions=5, outer_repetitions=2)
+
+
+VALUES_COUNT = 5_000
 KEY_COUNT = 100
-LONG_LIST_COMMON_KEYS = [(random.randint(0, KEY_COUNT-1), i) for i in range(VALUES_COUNT)]
-
-TESTS_1 = [
-	("create", lambda: TestPerformance.testCreateDict(LONG_LIST)),
-	("iterate over items", lambda: TestPerformance.testIterateItems(LONG_LIST)),
-	("iterate over values", lambda: TestPerformance.testIterateValues(LONG_LIST)),
-	("iterate over keys", lambda: TestPerformance.testIterateKeys(LONG_LIST)),
-	("iterate over unique keys", lambda: TestPerformance.testIterateUniqueKeys(LONG_LIST)),
-]
-
-TESTS_2 = [
-	("create", lambda: TestPerformance.testCreateDict(LONG_LIST_COMMON_KEYS)),
-	("iterate over items", lambda: TestPerformance.testIterateItems(LONG_LIST_COMMON_KEYS)),
-	("iterate over values", lambda: TestPerformance.testIterateValues(LONG_LIST_COMMON_KEYS)),
-	("iterate over keys", lambda: TestPerformance.testIterateKeys(LONG_LIST_COMMON_KEYS)),
-	("iterate over unique keys", lambda: TestPerformance.testIterateUniqueKeys(LONG_LIST_COMMON_KEYS)),
-]
 
 
-def run_tests(tests: list[tuple[str, Callable[[], dict[str, Result]]]]) -> dict[str,  dict[str, Result]]:
-	result = {}
-	for name, test in tests:
-		print(f"{name}:")
-		result[name] = test()
-	return result
+def get_long_list():
+	return [(i, i) for i in range(VALUES_COUNT)]
 
 
-def format_results(results: dict[str,  dict[str, Result]], format_val: Callable[[Result], str]) -> str:
-	column_keys = {}
-	for variations in results.values():
-		for variation in variations.keys():
-			column_keys.setdefault(variation)
+def get_long_list_common_keys(*, key_count: int = None, values_count: int = None):
+	if key_count is None:
+		key_count = KEY_COUNT
+	if values_count is None:
+		values_count = VALUES_COUNT
+	return [(random.randint(0, key_count - 1), i) for i in range(values_count)]
 
-	column_keys = list(column_keys)
 
-	# build table:
-	table: list[list[str]] = []
-	for category, variations in results.items():
-		row = [category]
-		table.append(row)
-		for column in column_keys:
-			val = variations.get(column)
-			row.append('' if val is None else format_val(val))
+def get_test_lists():
+	LONG_LIST = get_long_list()
+	LONG_LIST_COMMON_KEYS = get_long_list_common_keys()
 
-	column_keys = ['', *column_keys]
+	def create_tests(init_list):
+		return [
+			("create", lambda: testCreateDict(init_list)),
+			("addall / addlist", lambda: testAddAll(init_list)),
+			("update / updateall", lambda: testUpdate(init_list)),
+			("copy", lambda: testCopy(init_list)),
+			("iterate over items", lambda: testIterateItems(init_list)),
+			("iterate over values", lambda: testIterateValues(init_list)),
+			("iterate over keys", lambda: testIterateKeys(init_list)),
+			("iterate over unique keys", lambda: testIterateUniqueKeys(init_list)),
+		]
 
-	rows = len(table)
-	cols = len(column_keys)
-
-	# layout cells:
-	col_layout = [
-		(max(len(table[row][col]) for row in range(rows)), col != 0)
-		for col in range(cols)
-	]
-	# account for headers
-	col_layout = [
-		(max(len(key), col[0]), col[1])
-		for key, col in zip(column_keys, col_layout)
+	return [
+			create_tests(LONG_LIST),
+			create_tests(LONG_LIST_COMMON_KEYS),
+			# create_tests([]),
 	]
 
-	header = build_row(column_keys, col_layout)
 
-	row_strs = [
-		header,
-		build_header_seperator(col_layout),
-		*(build_row(row, col_layout) for row in table)
-	]
-
-	return '\n'.join(row_strs)
-
-
-def build_row(row: list[str], layout: list[tuple[int, bool]]) -> str:
-	row_str = ' | '.join(align_text(cell, *col_layout) for cell, col_layout in zip(row, layout))
-	return f'| {row_str} |'
+def profile_unique_keys():
+	LONG_LIST_COMMON_KEYS = get_long_list_common_keys()
+	profiler = BProfile(PROFILING_DIR + '/unique_keys_01.png')
+	omd = OrderedMultiDict(LONG_LIST_COMMON_KEYS)
+	with profiler:
+		total1 = sum(omd.unique_keys())
+		total2 = sum(omd.unique_keys())
+		total3 = sum(omd.unique_keys())
+	print(f"{total1=}, {total2=}, {total3=}")
 
 
-def build_header_seperator(layout: list[tuple[int, bool]]) -> str:
-	row_str = '|'.join(
-		'-' + '-'*width + (':' if right else '-')
-		for width, right
-		in layout
-	)
-	return f'|{row_str}|'
+def profile_keys():
+	LONG_LIST_COMMON_KEYS = get_long_list_common_keys()
+	profiler = BProfile(PROFILING_DIR + '/keys_01.png')
+	omd = OrderedMultiDict(LONG_LIST_COMMON_KEYS)
+	with profiler:
+		total1 = sum(omd.keys())
+		total2 = sum(omd.keys())
+		total3 = sum(omd.keys())
+	print(f"{total1=}, {total2=}, {total3=}")
 
 
-def align_text(text: str, length: int, right: bool) -> str:
-	if len(text) >= length:
-		return text
-	space = ' ' * (length - len(text))
-	return (space + text) if right else (text + space)
+def _profile_create(init_list, kind):
+	profiler = BProfile(PROFILING_DIR + f'/create_{kind}_01.png')
+	with profiler:
+		omd = OrderedMultiDict(init_list)
 
 
-def format_result(result: Result) -> str:
-	mean = result.min_mean * 1000
-	std = result.min_std * 1000
-	return f"{mean:1.2f} ms"
+def profile_create_llck():
+	LONG_LIST_COMMON_KEYS = get_long_list_common_keys()
+	_profile_create(LONG_LIST_COMMON_KEYS, 'llck')
 
 
-def format_float(number: float, precision: int, max_decimals: int = 20) -> str:
-	if number == 0.:
-		return '0.' + ('0'*precision)
-
-	magnitude_f = math.log10(abs(number))
-	magnitude = math.ceil(magnitude_f)
-	decimals = precision - int(magnitude)
-	decimals = max(0, min(decimals, max_decimals))
-	f_str = f"{{:.{decimals}f}}"
-	return f_str.format(number)
+def profile_create_ll():
+	LONG_LIST = get_long_list()
+	_profile_create(LONG_LIST, 'll')
 
 
-def run_and_format_tests(tests: list[tuple[str, Callable[[], dict[str, Result]]]]) -> str:
-	results = run_tests(tests)
-	result = format_results(results, format_result)
-	return result
+def _get_speedup_percentage(t1: float, t2: float) -> str:
+	return f"{t2 / t1 - 1:3.1%}" if t1 != 0 else "<i>NaN</i>"
 
 
-def run():
+def _get_speedup_factor(t1: float, t2: float) -> str:
+	if t1 > t2:
+		return f"<i>slower</i>"
+	else:
+		return f"{t2 / t1:1.1f}x" if t1 != 0 else "<i>NaN</i>"
+
+
+def default_format_results(results: dict[str, Result], format_val: Callable[[Result], str]) -> dict[str, str]:
+	results = list(results.items())
+	return {
+		results[0][0]: f"{results[0][1].min_min * 1000:1.2f} ms",
+		results[1][0]: f"{results[1][1].min_min * 1000:1.2f} ms",
+		"speedup": _get_speedup_factor(results[0][1].min_min, results[1][1].min_min)
+	}
+
+
+def run_the_tests(test_lists):
 	result_tables = []
-	for tests in [TESTS_1, TESTS_2]:
-		result_tables.append(run_and_format_tests(tests))
+	for tests in test_lists:
+		results = run_tests(tests)
+		result = format_results_table(results, lambda results: default_format_results(results, format_result))
+		result_tables.append(result)
 		print("")
 	print("")
+
 	for result in result_tables:
 		print(result)
 		print("")
 		print("")
 
 
+def run():
+	run_the_tests(get_test_lists())
+	# profile_keys()
+	# profile_unique_keys()
+	# profile_create_ll()
+	# profile_create_llck()
+
+
 if __name__ == '__main__':
+	if len(sys.argv) > 1:
+		VALUES_COUNT = int(sys.argv[1])
 	run()
