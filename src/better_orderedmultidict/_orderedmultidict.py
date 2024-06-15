@@ -259,7 +259,7 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		self._map[key].append((index, value))
 		self._items[index] = (key, value)
 
-	def addall(self, key: TK, value_list: list[TV]):
+	def addall(self, key: TK, value_list: list[TV]) -> None:
 		"""
 		Add the values in <valueList> to the list of values for <key>. If <key>
 		is not in the dictionary, the values in <valueList> become the values
@@ -273,17 +273,16 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 
 		Returns: <self>.
 		"""
+		if not value_list:
+			return
+		index: int = self._index
+		self._index += len(value_list)
+		self._map[key].extend(enumerate(value_list, index))
+
+		items = self._items
 		for value in value_list:
-			self.add(key, value)
-		# todo: following implementation might faster:
-		# index: int = self._index
-		# self._index += len(value_list)
-		# self._map[key].extend(enumerate(value_list, index))
-		#
-		# values = self._items[key]
-		# for value in value_list:
-		# 	values[index]((key, value))  # entry in _map is created here if necessary, because _map is a defaultdict
-		# 	index += 1
+			items[index] = (key, value)
+			index += 1
 
 	@overload
 	def popall(self, key: TK, /) -> Union[list[TV]]:
