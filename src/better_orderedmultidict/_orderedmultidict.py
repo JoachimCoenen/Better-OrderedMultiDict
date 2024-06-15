@@ -64,7 +64,7 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		if iterable_or_map is not _SENTINEL:
 			self._load(iterable_or_map)
 		if kwargs:
-			self._update(kwargs)
+			self._extend_fast(kwargs.items())
 
 	def _load(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
 		"""
@@ -76,7 +76,7 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 			self._copy_from(iterable_or_map)  # special case
 		else:
 			self.clear()
-			self._update(iterable_or_map)
+			self._extend(iterable_or_map)
 
 	@overload
 	def update(self, __m: _SupportsKeysAndGetItem[TK, TV], /) -> None: ...
@@ -91,37 +91,82 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 
 	def update(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV] = _SENTINEL, /, **kwargs: TV):
 		"""
-		Clear all existing key:value items and import all key:value items from
-		<mapping>. If multiple values exist for the same key in <mapping>, they
-		are all be imported.
+		Clear all existing key:value entries that have a key which is present in <iterable_or_map>. And then import all
+		key:value items from <iterable_or_map>. If multiple values exist for the same key in <mapping>, they are all
+		imported. Keys that are not present in <iterable_or_map> are not touched.
+
+		Example:
+			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3)])
+			>>> omd.update([(1, '1'), (3, '3'), (1, '11'), )   # list(omd.items()) == [(1,1)]
+			>>> print(omd.items())    # _ItemsView([(2, 2), (2, 22), (1, '1'), (3, '3'), (1, '11')])
+		"""
+
+		if iterable_or_map is not _SENTINEL:
+			self._try_telete_all_keys(iterable_or_map)
+		if kwargs:
+			self._try_telete_all_keys(kwargs)
+
+		self.extend(iterable_or_map, **kwargs)
+
+	def _try_telete_all_keys(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
+		if hasattr(iterable_or_map, 'keys'):
+			for k in iterable_or_map.keys():
+				self._try_delete_all(k)
+		elif hasattr(iterable_or_map, 'items'):
+			for k in dict.fromkeys(_iter_keys(iterable_or_map.items)):
+				self._try_delete_all(k)
+		else:
+			for k in dict.fromkeys(_iter_keys(iterable_or_map)):
+				self._try_delete_all(k)
+
+	@overload
+	def extend(self, __m: _SupportsKeysAndGetItem[TK, TV], /) -> None: ...
+	@overload
+	def extend(self, __m: Iterable[tuple[TK, TV]], /) -> None: ...
+	@overload
+	def extend(self: OrderedMultiDict[str, TV], /, **kwargs: TV) -> None: ...
+	@overload
+	def extend(self: OrderedMultiDict[str, TV], __m: _SupportsKeysAndGetItem[str, TV], /, **kwargs: TV) -> None: ...
+	@overload
+	def extend(self: OrderedMultiDict[str, TV], __m: Iterable[tuple[str, TV]], /, **kwargs: TV) -> None: ...
+
+	def extend(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV] = _SENTINEL, /, **kwargs: TV):
+		"""
+		Adds all key:value items from <iterable_or_map>. If multiple values exist for the same key in <mapping>, they are all
+		imported.
+
+		Example:
+			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3)])
+			>>> omd.extend([(1, '1'), (3, '3'), (1, '11'), )   # list(omd.items()) == [(1,1)]
+			>>> print(omd.items())    # _ItemsView([(1,1), (2,2), (1,11), (2, 22), (3,3), (1, '1'), (3, '3'), (1, '11')])
 		"""
 		if iterable_or_map is not _SENTINEL:
-			self._update(iterable_or_map)
+			self._extend(iterable_or_map)
 		if kwargs:
-			self._update(kwargs)
+			self._extend(kwargs)
 
-	def _update(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
+	def _extend(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
 		if hasattr(iterable_or_map, 'items'):
-			self._update_fast(iterable_or_map.items())
+			self._extend_fast(iterable_or_map.items())
 		elif hasattr(iterable_or_map, 'keys'):
 			for k, in iterable_or_map.keys():
 				self.add(k, iterable_or_map[k])
 		elif hasattr(iterable_or_map, '__len__'):
-			self._update_fast(iterable_or_map)
+			self._extend_fast(iterable_or_map)
 		else:
-			self._update_slow(iterable_or_map)
+			self._extend_slow(iterable_or_map)
 
-	def _update_fast(self, items) -> None:
+	def _extend_fast(self, items) -> None:
 		index: int = self._index
 		self._index += len(items)
 		self._items.update(enumerate(items, index))
 
 		s_map = self._map
-		for item in items:
-			s_map[item[0]].append((index, item[1]))  # entry in _map is created here if necessary, because _map is a defaultdict
+		for it0, it1 in items:
+			s_map[it0].append((index, it1))  # entry in _map is created here if necessary, because _map is a defaultdict
 			index += 1
 
-	def _update_slow(self, items) -> None:
+	def _extend_slow(self, items) -> None:
 		index: int = self._index
 
 		s_map = self._map

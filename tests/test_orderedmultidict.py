@@ -83,15 +83,62 @@ class TestOrderedMultiDict(TestCase):
 
 		# update by list & dicts
 		for update in self.list_updates + self.dict_updates:
+			new_items = items_list(update)
+			update_keys = {key for key, _ in new_items}
 			for items, omd in get_original_omds():
 				omd.update(update)
-				self.assertEqual(list(omd.items()), items + items_list(update))
+				filtered_items = [item for item in items if item[0] not in update_keys]
+				self.assertEqual(list(omd.items()), filtered_items + new_items)
 
-		# init by OrderedMultiDict
+		# update by OrderedMultiDict
 		for update in self.list_updates:
+			new_items = items_list(update)
+			update_keys = {key for key, _ in new_items}
 			for items, omd in get_original_omds():
 				omdUpdate = OrderedMultiDict(update)
 				omd.update(omdUpdate)
+				filtered_items = [item for item in items if item[0] not in update_keys]
+				self.assertEqual(list(omd.items()), filtered_items + new_items)
+
+		# Support **kwargs dictionary initialization.
+		items = [('Herr Kules', 42158), ('Freitag', 648), ('jack', 65477)]
+		updates = [items, dict(items), OrderedMultiDict(items)]
+		kwargs = [('Donald', 1122), ('Freitag', 2900), ('Mr Banks', 0)]
+
+		for update in updates:
+			new_items = items_list(update) + kwargs
+			update_keys = {key for key, _ in new_items}
+			for items, omd in get_original_omds():
+				omd.update(update, **dict(kwargs))
+				filtered_items = [item for item in items if item[0] not in update_keys]
+				self.assertEqual(list(omd.items()), filtered_items + new_items)
+
+		new_items = kwargs
+		update_keys = {key for key, _ in new_items}
+		for items, omd in get_original_omds():
+			omd.update(**dict(kwargs))
+			filtered_items = [item for item in items if item[0] not in update_keys]
+			self.assertEqual(list(omd.items()), filtered_items + kwargs)
+
+	def test_expand(self):
+		def get_original_omds():
+			return [
+				(items, OrderedMultiDict(items)) for items in [
+					[], [(1, 1), (3, 1), (1, 4)], [(None, None), (None, None)], [(False, False)]
+				]
+			]
+
+		# update by list & dicts
+		for update in self.list_updates + self.dict_updates:
+			for items, omd in get_original_omds():
+				omd.extend(update)
+				self.assertEqual(list(omd.items()), items + items_list(update))
+
+		# update by OrderedMultiDict
+		for update in self.list_updates:
+			for items, omd in get_original_omds():
+				omdUpdate = OrderedMultiDict(update)
+				omd.extend(omdUpdate)
 				self.assertEqual(list(omd.items()), items + items_list(update))
 
 		# Support **kwargs dictionary initialization.
@@ -101,11 +148,11 @@ class TestOrderedMultiDict(TestCase):
 
 		for update in updates:
 			for items, omd in get_original_omds():
-				omd.update(update, **dict(kwargs))
+				omd.extend(update, **dict(kwargs))
 				self.assertEqual(list(omd.items()), items + items_list(update) + kwargs)
 
 		for items, omd in get_original_omds():
-			omd.update(**dict(kwargs))
+			omd.extend(**dict(kwargs))
 			self.assertEqual(list(omd.items()), items + kwargs)
 	def test_clear(self):
 		for init in self.list_inits + self.dict_inits:
