@@ -1,3 +1,3 @@
-from ._orderedmultidict import OrderedMultiDict
+from ._orderedmultidict import OrderedMultiDict, DeOrderedMultiDict
 
-__all__ = ['OrderedMultiDict']
+__all__ = ['OrderedMultiDict', 'DeOrderedMultiDict']

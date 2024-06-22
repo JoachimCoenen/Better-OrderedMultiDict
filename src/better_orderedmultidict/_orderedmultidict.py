@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections import deque, defaultdict
+from collections import OrderedDict, defaultdict, deque
 from operator import eq, itemgetter
-from typing import Any, Hashable, Iterable, Iterator, Optional, Protocol, Self, overload, Union, MutableMapping
+from typing import Any, ClassVar, Hashable, Iterable, Iterator, Protocol, Self, Sized, Type, overload, Union, MutableMapping, override, runtime_checkable
 
 
 _BUGREPORT_MSG: str = "Please file a bugreport if ypu have not fiddled with any internal fields or methods of OrderedMultiDict."
@@ -13,9 +13,15 @@ _SENTINEL = object()
 _SENTINEL2 = object()
 
 
+@runtime_checkable
 class _SupportsKeysAndGetItem[TK: Hashable, TV](Protocol):
 	def keys(self) -> Iterable[TK]: ...
-	def __getitem__(self, __key: TK) -> TV: ...
+	def __getitem__(self, key: TK, /) -> TV: ...
+
+
+@runtime_checkable
+class _SizedIterable[T](Iterable[T], Sized, Protocol):
+	...
 
 
 def _pop_first[TK: Hashable, TV](d: dict[TK, TV]) -> tuple[TK, TV]:
@@ -34,8 +40,16 @@ def _iter_values[TV](values: Iterable[tuple[Any, TV]]) -> Iterator[TV]:
 	return map(itemgetter(1), values)
 
 
-class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
-	
+class OrderedMultiDictBase[TK: Hashable, TV, _Q](MutableMapping[TK, TV]):
+	_ItemsDictCls: ClassVar[Type[dict]]
+	_DequeCls: ClassVar[Type[Iterable]]
+
+	def _items_pop_first(self, items: dict) -> tuple[int, tuple[TK, TV]]:
+		raise NotImplementedError('_items_pop_first()')
+
+	def _q_popleft(self, que: _Q) -> tuple[int, TV]:
+		raise NotImplementedError('_q_popleft()')
+
 	@overload
 	def __init__(self) -> None: ...
 	@overload
@@ -43,23 +57,23 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 	@overload
 	def __init__(self, __iterable: Iterable[tuple[TK, TV]], /) -> None: ...
 	@overload
-	def __init__(self: OrderedMultiDict[str, TV], /, **kwargs: TV) -> None: ...
+	def __init__(self: OrderedMultiDictBase[str, TV], /, **kwargs: TV) -> None: ...
 	@overload
-	def __init__(self: OrderedMultiDict[str, TV], /, __map: _SupportsKeysAndGetItem[str, TV], **kwargs: TV) -> None: ...
+	def __init__(self: OrderedMultiDictBase[str, TV], /, __map: _SupportsKeysAndGetItem[str, TV], **kwargs: TV) -> None: ...
 	@overload
-	def __init__(self: OrderedMultiDict[str, TV], /, __iterable: Iterable[tuple[str, TV]], **kwargs: TV) -> None: ...
+	def __init__(self: OrderedMultiDictBase[str, TV], /, __iterable: Iterable[tuple[str, TV]], **kwargs: TV) -> None: ...
 
 	# Next two overloads are for OrderedMultiDict(string.split(sep) for string in iterable)
 	# Cannot be Iterable[Sequence[_T]] or otherwise dict(["foo", "bar", "baz"]) is not an error
 	@overload
-	def __init__(self: OrderedMultiDict[str, str], __iterable: Iterable[list[str]], /) -> None: ...
+	def __init__(self: OrderedMultiDictBase[str, str], __iterable: Iterable[list[str]], /) -> None: ...
 	@overload
-	def __init__(self: OrderedMultiDict[bytes, bytes], __iterable: Iterable[list[bytes]], /) -> None: ...
+	def __init__(self: OrderedMultiDictBase[bytes, bytes], __iterable: Iterable[list[bytes]], /) -> None: ...
 
 	def __init__(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV] = _SENTINEL, /, **kwargs: TV):
-		self._items: dict[int, tuple[TK, TV]] = {}
-		self._map: defaultdict[TK, deque[tuple[int, TV]]] = defaultdict(deque)
-		self._index: int = 0
+		self._items: dict[int, tuple[TK, TV]] = self._ItemsDictCls()
+		self._map: defaultdict[TK, _Q] = defaultdict(self._DequeCls)
+		self._index: int = 0  # _index is only used to have a unique id for each entry, not to track their order.
 
 		if iterable_or_map is not _SENTINEL:
 			self._load(iterable_or_map)
@@ -72,7 +86,7 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		<mapping>. If multiple values exist for the same key in <mapping>, they
 		are all be imported.
 		"""
-		if isinstance(iterable_or_map, OrderedMultiDict):
+		if isinstance(iterable_or_map, OrderedMultiDictBase):
 			self._copy_from(iterable_or_map)  # special case
 		else:
 			self.clear()
@@ -83,11 +97,11 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 	@overload
 	def update(self, __m: Iterable[tuple[TK, TV]], /) -> None: ...
 	@overload
-	def update(self: OrderedMultiDict[str, TV], /, **kwargs: TV) -> None: ...
+	def update(self: OrderedMultiDictBase[str, TV], /, **kwargs: TV) -> None: ...
 	@overload
-	def update(self: OrderedMultiDict[str, TV], __m: _SupportsKeysAndGetItem[str, TV], /, **kwargs: TV) -> None: ...
+	def update(self: OrderedMultiDictBase[str, TV], __m: _SupportsKeysAndGetItem[str, TV], /, **kwargs: TV) -> None: ...
 	@overload
-	def update(self: OrderedMultiDict[str, TV], __m: Iterable[tuple[str, TV]], /, **kwargs: TV) -> None: ...
+	def update(self: OrderedMultiDictBase[str, TV], __m: Iterable[tuple[str, TV]], /, **kwargs: TV) -> None: ...
 
 	def update(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV] = _SENTINEL, /, **kwargs: TV):
 		"""
@@ -109,7 +123,10 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		self.extend(iterable_or_map, **kwargs)
 
 	def _try_telete_all_keys(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
-		if hasattr(iterable_or_map, 'keys'):
+		if hasattr(iterable_or_map, 'unique_keys'):
+			for k in iterable_or_map.unique_keys():
+				self._try_delete_all(k)
+		elif hasattr(iterable_or_map, 'keys'):
 			for k in iterable_or_map.keys():
 				self._try_delete_all(k)
 		elif hasattr(iterable_or_map, 'items'):
@@ -124,11 +141,11 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 	@overload
 	def extend(self, __m: Iterable[tuple[TK, TV]], /) -> None: ...
 	@overload
-	def extend(self: OrderedMultiDict[str, TV], /, **kwargs: TV) -> None: ...
+	def extend(self: OrderedMultiDictBase[str, TV], /, **kwargs: TV) -> None: ...
 	@overload
-	def extend(self: OrderedMultiDict[str, TV], __m: _SupportsKeysAndGetItem[str, TV], /, **kwargs: TV) -> None: ...
+	def extend(self: OrderedMultiDictBase[str, TV], __m: _SupportsKeysAndGetItem[str, TV], /, **kwargs: TV) -> None: ...
 	@overload
-	def extend(self: OrderedMultiDict[str, TV], __m: Iterable[tuple[str, TV]], /, **kwargs: TV) -> None: ...
+	def extend(self: OrderedMultiDictBase[str, TV], __m: Iterable[tuple[str, TV]], /, **kwargs: TV) -> None: ...
 
 	def extend(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV] = _SENTINEL, /, **kwargs: TV):
 		"""
@@ -137,7 +154,7 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 
 		Example:
 			>>> omd = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3)])
-			>>> omd.extend([(1, '1'), (3, '3'), (1, '11'), )   # list(omd.items()) == [(1,1)]
+			>>> omd.extend([(1, '1'), (3, '3'), (1, '11')])
 			>>> print(omd.items())    # _ItemsView([(1,1), (2,2), (1,11), (2, 22), (3,3), (1, '1'), (3, '3'), (1, '11')])
 		"""
 		if iterable_or_map is not _SENTINEL:
@@ -148,19 +165,26 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 	def _extend(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
 		if hasattr(iterable_or_map, 'items'):
 			self._extend_fast(iterable_or_map.items())
-		elif hasattr(iterable_or_map, 'keys'):
+		elif isinstance(iterable_or_map, _SupportsKeysAndGetItem):
 			for k, in iterable_or_map.keys():
 				self.add(k, iterable_or_map[k])
-		elif hasattr(iterable_or_map, '__len__'):
+			#elif hasattr(iterable_or_map, '__len__') and hasattr(iterable_or_map, '__iter__'):
+		elif isinstance(iterable_or_map, _SizedIterable):
 			self._extend_fast(iterable_or_map)
 		else:
 			self._extend_slow(iterable_or_map)
 
-	def _extend_fast(self, items) -> None:
+	def _extend_fast(self, items: _SizedIterable[tuple[TK, TV]]) -> None:
+		index: int = self._index
+		self.__extend_fast_part_1(items)
+		self.__extend_fast_part_2(items, index)
+
+	def __extend_fast_part_1(self, items: _SizedIterable[tuple[TK, TV]]) -> None:
 		index: int = self._index
 		self._index += len(items)
 		self._items.update(enumerate(items, index))
 
+	def __extend_fast_part_2(self, items: _SizedIterable[tuple[TK, TV]], index: int) -> None:
 		s_map = self._map
 		for it0, it1 in items:
 			s_map[it0].append((index, it1))  # entry in _map is created here if necessary, because _map is a defaultdict
@@ -173,8 +197,8 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		s_items = self._items
 		try:
 			for item in items:
-				# Split herre, so we are sure that item can be split into exactly two items,
-				# before we start to update any internal state. This avoids leaving the
+				# Split herre, so we are sure that item can be split into exactly two items
+				# *before* we start to update any internal state. This avoids leaving the
 				# OrderedMultiDict in an invalid state if item cannot be split.
 				k, v = item
 				# entry in _map is created here if necessary, because _map is a defaultdict
@@ -184,21 +208,22 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		finally:
 			self._index = index
 
-	def _copy_from(self, others: OrderedMultiDict[TK, TV]) -> Self:
-		self._items = others._items.copy()
+	def _copy_from(self, others: OrderedMultiDictBase[TK, TV, Any]) -> Self:
+		self._items = self._ItemsDictCls(others._items)
 		self._index = others._index
-		self._map = defaultdict(deque, {key: que.copy() for key, que in others._map.items()})
+		deque_cls = self._DequeCls
+		self._map = defaultdict(deque_cls, {key: deque_cls(que) for key, que in others._map.items()})
 		return self
 
-	def copy(self) -> OrderedMultiDict[TK, TV]:
+	def copy(self) -> Self:
 		return type(self)()._copy_from(self)
 
 	def clear(self):
-		self._map.clear()  # important! clear _map first!!
+		self._map.clear()
 		self._items.clear()
 		self._index = 0
 
-	def _get_all_or_none(self, key: TK) -> Optional[deque[tuple[int, TV]]]:
+	def _get_all_or_none(self, key: TK) -> _Q | None:
 		result = self._map.get(key)
 		if result is not None:  # if key in self:
 			assert result, _EMPTY_DEQUE_ERROR_MSG  # result must not be empty!
@@ -389,7 +414,7 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		Returns: List of <key>'s values.
 		"""
 		if (values := self._get_all_or_none(key)) is not None:  # if key in self:
-			# we might be able to improve performance a little bit here...
+			# todo: we might be able to improve performance a little bit here...
 			result = []
 			for val in values:
 				result.append(val[1])
@@ -428,7 +453,7 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 
 	def _popitem[TT](self, default: TT, *, last: bool) -> tuple[TK, TV] | TT:
 		try:
-			item = (_pop_last(self._items) if last else _pop_first(self._items))[1]
+			item = (_pop_last(self._items) if last else self._items_pop_first(self._items))[1]
 		except (StopIteration, KeyError):
 			if default is not _SENTINEL:
 				return default
@@ -437,10 +462,9 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 		values = self._get_all_or_none(item[0])
 		assert values is not None, _DESYNCED_ERROR_MSG
 
-		popped = values.pop() if last else values.popleft()
+		popped = values.pop() if last else self._q_popleft(values)
 		if not values:
 			del self._map[item[0]]
-
 		assert popped[1] is item[1], _DESYNCED_ERROR_MSG
 		return item
 
@@ -494,7 +518,7 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 
 	def _pop[TT](self, key: TK, default: TT, *, last: bool) -> TV | TT:
 		if (values := self._get_all_or_none(key)) is not None:  # if key in self:
-			popped = values.pop() if last else values.popleft()
+			popped = values.pop() if last else self._q_popleft(values)
 			assert popped[0] in self._items, _DESYNCED_ERROR_MSG
 			del self._items[popped[0]]
 			if not values:
@@ -626,14 +650,14 @@ class OrderedMultiDict[TK: Hashable, TV](MutableMapping[TK, TV]):
 	def __getstate__(self) -> list[tuple[TK, TV]]:
 		return list(self._items.values())
 
-	def __setstate__(self, state: list[tuple[TK, TV]]):  # (self, TK, List[Tuple[TK, TV]])
+	def __setstate__(self, state: list[tuple[TK, TV]]):
 		self._load(state)
 
 
 class _ViewBase[TK: Hashable, TV]:
 
-	def __init__(self, impl: OrderedMultiDict[TK, TV]):
-		self._impl: OrderedMultiDict[TK, TV] = impl
+	def __init__(self, impl: OrderedMultiDictBase[TK, TV, Any]):
+		self._impl: OrderedMultiDictBase[TK, TV, Any] = impl
 		self._items = impl._items.values()
 
 	def __len__(self):
@@ -650,9 +674,6 @@ class _ViewBase[TK: Hashable, TV]:
 
 
 class _ItemsView[TK: Hashable, TV](_ViewBase[TK, TV]):
-
-	def __init__(self, impl: OrderedMultiDict[TK, TV]):
-		super().__init__(impl)
 
 	def __contains__(self, item: tuple[TK, TV]) -> bool:
 		if not isinstance(item, tuple) or len(item) != 2:
@@ -707,4 +728,57 @@ class _UniqueKeysView[TK: Hashable](_ViewBase[TK, Any]):
 		return len(self._impl._map)
 
 
-__all__ = ['OrderedMultiDict']
+class OrderedMultiDict[TK: Hashable, TV](OrderedMultiDictBase[TK, TV, list[tuple[int, TV]]]):
+	"""
+	about 2x faster than DeOrderedMultiDict, but at the cost of horrible OrderedMultiDict.popfirst() performance characteristics:
+		- k, v = OrderedMultiDict.popfirstitem() is **O(n+m)**
+		- v = OrderedMultiDict.popfirst(k) is **O(m)**
+		- k, v = DeOrderedMultiDict.popfirstitem() is **O(1)**
+		- v = DeOrderedMultiDict.popfirst(k) is **O(1)**
+	where n = len(OrderedMultiDict); and m = len(OrderedMultiDict.getall(k)).
+
+	.pop() & .poplast(), etc. are **O(1)** for both OrderedMultiDict and DeOrderedMultiDict
+	"""
+	_ItemsDictCls: ClassVar[Type[dict]] = dict
+
+	# Using list to store the (id, value)-pairs for a key means O(n) performance for OrderedMultiDict.popfirst().
+	# But it's twice as fast compared to Colections.deque for most other operations and has a way smaller minimum memory footprint.
+	_DequeCls: ClassVar[Type[Iterable]] = list
+
+	@override
+	def _items_pop_first(self, items: dict) -> tuple[int, tuple[TK, TV]]:
+		return (k := next(iter(items)), items.pop(k))
+
+	@override
+	def _q_popleft(self, queue) -> tuple[int, TV]:
+		return queue.pop(0)
+
+
+class DeOrderedMultiDict[TK: Hashable, TV](OrderedMultiDictBase[TK, TV, deque[tuple[int, TV]]]):
+	"""
+	about 2x slower than OrderedMultiDict, but offers superior .popfirst() performance characteristics:
+		- k, v = OrderedMultiDict.popfirstitem() is **O(n+m)**
+		- v = OrderedMultiDict.popfirst(k) is **O(m)**
+		- k, v = DeOrderedMultiDict.popfirstitem() is **O(1)**
+		- v = DeOrderedMultiDict.popfirst(k) is **O(1)**
+	where n = len(OrderedMultiDict); and m = len(OrderedMultiDict.getall(k)).
+
+	.pop() & .poplast(), etc. are **O(1)** for both OrderedMultiDict and DeOrderedMultiDict
+	"""
+	# dict would be faster, but the first `next(iter(my_dict))` seems to be a O(n) operation for normal dicts, which would mean that calling OrderedMultiDict.popfirst() twice would be always be O(n).
+	_ItemsDictCls: ClassVar[Type[dict]] = OrderedDict
+
+	# The collections.deque is a proper double-ended queue based on a doubly-linked list of fixed length blocks, which means O(1) performance for OrderedMultiDict.popfirst().
+	# But it has a huge minimum memory footprint of 760(!) bytes, and is half as fast compared to a list for most other operations.
+	_DequeCls: ClassVar[Type[Iterable]] = deque
+
+	@override
+	def _items_pop_first(self, items: OrderedDict) -> tuple[int, tuple[TK, TV]]:
+		return items.popitem(last=False)
+
+	@override
+	def _q_popleft(self, queue) -> tuple[int, TV]:
+		return queue.popleft()
+
+
+__all__ = ['OrderedMultiDict', 'DeOrderedMultiDict']
