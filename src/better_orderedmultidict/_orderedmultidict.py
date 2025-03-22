@@ -86,7 +86,7 @@ class OrderedMultiDictBase[TK: Hashable, TV, _Q: MutableSequence[tuple[int, Any]
 		if iterable_or_map is not _SENTINEL:
 			self._load(iterable_or_map)
 		if kwargs:
-			self._extend_fast(kwargs.items())  # type: ignore
+			self._extend_iterable(kwargs.items())  # type: ignore
 
 	def _load(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
 		"""
@@ -124,13 +124,13 @@ class OrderedMultiDictBase[TK: Hashable, TV, _Q: MutableSequence[tuple[int, Any]
 		"""
 
 		if iterable_or_map is not _SENTINEL:
-			self._try_telete_all_keys(iterable_or_map)
+			self._try_delete_all_keys(iterable_or_map)
 		if kwargs:
-			self._try_telete_all_keys(kwargs)  # type: ignore
+			self._try_delete_all_keys(kwargs)  # type: ignore
 
 		self.extend(iterable_or_map, **kwargs)
 
-	def _try_telete_all_keys(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
+	def _try_delete_all_keys(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
 		if hasattr(iterable_or_map, 'unique_keys'):
 			for k in iterable_or_map.unique_keys():
 				self._try_delete_all(k)
@@ -172,46 +172,22 @@ class OrderedMultiDictBase[TK: Hashable, TV, _Q: MutableSequence[tuple[int, Any]
 
 	def _extend(self, iterable_or_map: Iterable[tuple[TK, TV]] | _SupportsKeysAndGetItem[TK, TV]):
 		if hasattr(iterable_or_map, 'items'):
-			self._extend_fast(iterable_or_map.items())
+			self._extend_iterable(iterable_or_map.items())
 		elif isinstance(iterable_or_map, _SupportsKeysAndGetItem):
 			for k in iterable_or_map.keys():
 				self.add(k, iterable_or_map[k])
-			#elif hasattr(iterable_or_map, '__len__') and hasattr(iterable_or_map, '__iter__'):
-		elif isinstance(iterable_or_map, _SizedIterable):
-			self._extend_fast(iterable_or_map)
 		else:
-			self._extend_slow(iterable_or_map)
+			self._extend_iterable(iterable_or_map)
 
-	def _extend_fast(self, items: _SizedIterable[tuple[TK, TV]]) -> None:
+	def _extend_iterable(self, items: Iterable[tuple[TK, TV]]) -> None:
 		index: int = self._index
-		self.__extend_fast_part_1(items)
-		self.__extend_fast_part_2(items, index)
-
-	def __extend_fast_part_1(self, items: _SizedIterable[tuple[TK, TV]]) -> None:
-		index: int = self._index
-		self._index += len(items)
-		self._items.update(enumerate(items, index))
-
-	def __extend_fast_part_2(self, items: _SizedIterable[tuple[TK, TV]], index: int) -> None:
-		s_map = self._map
-		for it0, it1 in items:
-			s_map[it0].append((index, it1))  # entry in _map is created here if necessary, because _map is a defaultdict
-			index += 1
-
-	def _extend_slow(self, items) -> None:
-		index: int = self._index
-
 		s_map = self._map
 		s_items = self._items
 		try:
-			for item in items:
-				# Split herre, so we are sure that item can be split into exactly two items
-				# *before* we start to update any internal state. This avoids leaving the
-				# OrderedMultiDict in an invalid state if item cannot be split.
-				k, v = item
+			for k, v in items:
 				# entry in _map is created here if necessary, because _map is a defaultdict
-				s_map[k].append((index, v))
-				s_items[index] = item
+				s_map[k].append((index, v))  # might raise TypeError: unhashable type
+				s_items[index] = (k, v)  # recreate the tuple, because we are not guaranteed to get an actual pure & immutable tuple.
 				index += 1
 		finally:
 			self._index = index
@@ -369,8 +345,8 @@ class OrderedMultiDictBase[TK: Hashable, TV, _Q: MutableSequence[tuple[int, Any]
 		if not value_list:
 			return
 		index: int = self._index
-		self._index += len(value_list)
 		self._map[key].extend(enumerate(value_list, index))
+		self._index += len(value_list)
 
 		items = self._items
 		for value in value_list:
@@ -666,7 +642,7 @@ class OrderedMultiDictBase[TK: Hashable, TV, _Q: MutableSequence[tuple[int, Any]
 		return bool(self._map)
 
 	def __str__(self) -> str:
-		return '{%s}' % ', '.join(f'{repr(p[0])}: {repr(p[1])}' for p in self._items.values())
+		return '{%s}' % ', '.join(f'{p[0]!r}: {p[1]!r}' for p in self._items.values())
 
 	def __repr__(self) -> str:
 		return f'{self.__class__.__name__}({list(self._items.values())!r})'

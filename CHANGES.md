@@ -1,5 +1,17 @@
 ## Next Version
 ### Fixes
+ * Fixed a bug where when creating, updating, or extending an OrderedMultiDict using a collection of lists instead of tuples and then changing one of the lists causes the OrderedMultiDict to break in very subtle ways.
+    ```pycon
+    >>> from better_orderedmultidict import OrderedMultiDict
+    ... items = [['0', 'zero'], ['1', 'one']]
+    ... dictionary = OrderedMultiDict(items)
+    >>> items[0][:] = ['2', 'two']  # change one item 'tuple'
+    >>> '2' in dictionary  # is False, as expected
+    False
+    >>> '2' in set(dictionary.keys())  # should also be False
+    True
+    ```
+ * Fixed a bug where when creating, updating, or extending an OrderedMultiDict could leave it in a broken state, if some of the keys are not hashable.
  * Fixed mypy issues
 
 
