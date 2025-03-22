@@ -20,3 +20,6 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/JoachimCoenen/Better-OrderedMultiDict"
 Issues = "https://github.com/JoachimCoenen/Better-OrderedMultiDict/issues"
+
+[tool.setuptools.package-data]
+"better_orderedmultidict" = ["py.typed"]
