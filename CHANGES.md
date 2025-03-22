@@ -1,4 +1,4 @@
-## Next Version
+## 0.2.2
 ### Fixes
  * Fixed a bug where when creating, updating, or extending an OrderedMultiDict using a collection of lists instead of tuples and then changing one of the lists causes the OrderedMultiDict to break in very subtle ways.
     ```pycon
