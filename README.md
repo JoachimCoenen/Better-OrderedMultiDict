@@ -8,40 +8,37 @@
   <!-- <img src="https://img.shields.io/pypi/l/better_orderedmultidict.svg"> -->
   <!--<a href="https://pypi.python.org/pypi/better_orderedmultidict"><img src="https://img.shields.io/pypi/pyversions/better_orderedmultidict.svg"></a>-->
 
-<!-- TOC 
-  * [Overview](#overview)
-  * [Differences to omdict](#differences-to-omdict)
-  * [Performance Comparison](#performance-comparison)
-  * [Examples](#examples)
-  * [Installation](#installation)
- TOC -->
 
 ## Overview
 
-Better OrderedMultiDict provides `OrderedMultiDict`, a fast[*](#performance-comparison), ordered multivalued dictionary.
+Better OrderedMultiDict provides two fast ordered multivalued dictionaries: `OrderedMultiDict` and `DeOrderedMultiDict`.
 
-`OrderedMultiDict` is multivalued, which means that there can be multiple items with the same key:  
+Multivalued means that there can be multiple items with the same key:  
 ```python
 from better_orderedmultidict import OrderedMultiDict
 dictionary = OrderedMultiDict()
-dictionary.add("umfahren", "to drive around")
-dictionary.add("umfahren", "to drive over, to knock sth. over")
-print(dictionary.getall("umfahren"))  # ["to drive around", "to drive over, to knock sth. over"]
+dictionary.add("Schrödinger's cat", "dead")
+dictionary.add("Schrödinger's cat", "alive")
+print(dictionary.getall("Schrödinger's cat"))  #["dead", "alive"]
 ```
 
-`OrderedMultiDict` retains the insertion order of all keys and values:
+Ordered means that the insertion order of all keys and values is retained:
 ```python
 from better_orderedmultidict import OrderedMultiDict
 dictionary = OrderedMultiDict()
-dictionary.add('a', 'A1')
-dictionary.add('b', 'B')
-dictionary.add('a', 'A2')
-print(', '.join(dictionary.values()))      # A1, B, A2
-print(', '.join(dictionary.unique_keys())) # a, b
+dictionary.add("Schrödinger's cat", "alive")
+dictionary.add("Pavlov's dog", "conditioned")
+dictionary.add("Schrödinger's cat", "dead")
 
-dictionary.popfirstitem()
-print(', '.join(dictionary.values()))      # B, A2
-print(', '.join(dictionary.unique_keys())) # b, a
+print(list(dictionary.values()))      # ["alive", "conditioned", "dead"]
+print(list(dictionary.unique_keys())) # ["Schrödinger's cat", "Pavlov's dog"]
+print(list(dictionary.keys()))        # ["Schrödinger's cat", "Pavlov's dog", "Schrödinger's cat"]
+
+dictionary.poplastitem()
+
+print(list(dictionary.values()))      # ["alive", "conditioned"]
+print(list(dictionary.unique_keys())) # ["Schrödinger's cat", "Pavlov's dog"]
+print(list(dictionary.keys()))        # ["Schrödinger's cat", "Pavlov's dog"]
 ```
 
 Better OrderedMultiDict requires Python 3.12+ and is fully type annotated.
@@ -52,47 +49,70 @@ Better OrderedMultiDict requires Python 3.12+ and is fully type annotated.
 ## Performance Comparison
 Creating / iterating over dictionary with 500'000 entries with all keys being different:
 
-|                                 | OrderedMultiDict | [omdict][omdict_LINK] |       speedup | | [bolton][bolton_LINK] </br>OrderedMultiDict | speedup |
-|---------------------------------|-----------------:|----------------------:|--------------:|-|--------------------------------------------:|--------:|
-| create                          |         164.3 ms |              548.0 ms |          3.2x | |                                    304.1 ms |    1.9x |
-| addall / addlist                |          82.3 ms |              311.7 ms |          3.8x | |                                    139.6 ms |    1.7x |
-| update / updateall<sup>1)</sup> |         262.2 ms |              531.5 ms |          2.0x | |                                    325.5 ms |    1.2x |
-| extend / update_extend          |         156.4 ms |                    -- |            -- | |                                    285.5 ms |    1.8x |
-| copy                            |         100.1 ms |              646.7 ms |          6.5x | |                                    350.7 ms |    3.4x |
-| iterate over items              |          11.2 ms |               97.0 ms |          8.6x | |                                     81.0 ms |    7.2x |
-| iterate over values             |          12.3 ms |               77.3 ms |          6.3x | |                                     81.3 ms |    6.3x |
-| iterate over keys               |          12.6 ms |               78.6 ms |          6.2x | |                                     53.0 ms |    4.2x |
-| iterate over unique keys        |          42.4 ms |               23.7 ms | <i>slower</i> | |                                     94.1 ms |    2.2x |
-| pop last item until empty       |         268.7 ms |              501.3 ms |          1.9x | |                                    884.3 ms |    3.2x |
+|                                 | OrderedMultiDict | [omdict][omdict_LINK] |       speedup | | [boltons][boltons_LINK] </br>OrderedMultiDict |       speedup |
+|---------------------------------|-----------------:|----------------------:|--------------:|-|----------------------------------------------:|--------------:|
+| create                          |         117.6 ms |              285.8 ms |          2.4x | |                                      136.2 ms |          1.2x |
+| addall / addlist                |          67.4 ms |              158.2 ms |          2.3x | |                                       66.6 ms | <i>slower</i> |
+| update / updateall<sup>1)</sup> |         133.1 ms |              281.3 ms |          2.1x | |                                      175.1 ms |          1.3x |
+| extend / update_extend          |          92.6 ms |                    -- |            -- | |                                      145.9 ms |          1.6x |
+| copy                            |          52.3 ms |              335.7 ms |          6.4x | |                                      195.7 ms |          3.7x |
+| iterate over items              |           2.2 ms |               45.2 ms |         20.3x | |                                       46.2 ms |         20.8x |
+| iterate over values             |           5.7 ms |               33.5 ms |          5.8x | |                                       33.1 ms |          5.8x |
+| iterate over keys               |           5.8 ms |               33.3 ms |          5.8x | |                                       15.8 ms |          2.7x |
+| iterate over unique keys        |          16.5 ms |                5.8 ms | <i>slower</i> | |                                       32.0 ms |          1.9x |
+| pop last item until empty       |         138.0 ms |              242.6 ms |          1.8x | |                                      403.4 ms |          2.9x |
 
 
 Creating / iterating over dictionary with 500'000 entries, but only 100 unique keys distributed randomly:
 
-|                                 | OrderedMultiDict | [omdict][omdict_LINK] |       speedup | | [bolton][bolton_LINK] </br>OrderedMultiDict | speedup |
-|---------------------------------|-----------------:|----------------------:|--------------:|-|--------------------------------------------:|--------:|
-| create                          |          89.7 ms |              484.5 ms |          5.4x | |                                    258.8 ms |    2.7x |
-| addall / addlist                |          84.7 ms |              317.1 ms |          3.7x | |                                    137.5 ms |    1.6x |
-| update / updateall<sup>1)</sup> |         110.8 ms |              491.8 ms |          4.4x | |                                    278.2 ms |    2.5x |
-| extend / update_extend          |          91.3 ms |                    -- |            -- | |                                    257.3 ms |    2.7x |
-| copy                            |          24.0 ms |              595.8 ms |         24.8x | |                                    307.8 ms |   12.4x |
-| iterate over items              |          11.2 ms |              102.5 ms |          9.2x | |                                     77.4 ms |    6.8x |
-| iterate over values             |          17.0 ms |               81.0 ms |          4.8x | |                                     80.1 ms |    4.8x |
-| iterate over keys               |          16.9 ms |               78.3 ms |          4.6x | |                                     50.5 ms |    3.0x |
-| iterate over unique keys        |          18.8 ms |           &lt; 0.1 ms | <i>slower</i> | |                                     36.0 ms |    1.9x |
-| pop last item until empty       |         235.7 ms |              484.8 ms |          2.1x | |                                    401.8 ms |    1.7x |
+|                                 | OrderedMultiDict | [omdict][omdict_LINK] |       speedup | | [boltons][boltons_LINK] </br>OrderedMultiDict | speedup |
+|---------------------------------|-----------------:|----------------------:|--------------:|-|----------------------------------------------:|--------:|
+| create                          |          46.7 ms |              249.2 ms |          5.3x | |                                      120.9 ms |    2.6x |
+| addall / addlist                |          59.6 ms |              156.9 ms |          2.6x | |                                       67.3 ms |    1.1x |
+| update / updateall<sup>1)</sup> |          53.0 ms |              250.5 ms |          4.7x | |                                      116.0 ms |    2.2x |
+| extend / update_extend          |          51.0 ms |                    -- |            -- | |                                      117.5 ms |    2.3x |
+| copy                            |           9.1 ms |              281.6 ms |         30.8x | |                                      133.9 ms |   14.6x |
+| iterate over items              |           2.5 ms |               44.0 ms |         17.7x | |                                       29.7 ms |   11.9x |
+| iterate over values             |           7.3 ms |               31.3 ms |          4.3x | |                                       31.3 ms |    4.3x |
+| iterate over keys               |          11.9 ms |               31.0 ms |          2.6x | |                                       18.1 ms |    1.5x |
+| iterate over unique keys        |          18.2 ms |           &lt; 0.1 ms | <i>slower</i> | |                                       19.0 ms |    1.0x |
+| pop last item until empty       |         110.0 ms |              215.1 ms |          2.0x | |                                      163.3 ms |    1.5x |
 
 
 1):  `omdict. updateall()` has slightly different behavior: `omdict` keeps the positions for already existing keys, but `OrderedMultiDict` and bolton's `OrderedMultiDict` do not:
+
 ```python
 from better_orderedmultidict import OrderedMultiDict
 from orderedmultidict import omdict
-omd1 = OrderedMultiDict([(1,1), (2,2), (1,11), (2, 22), (3,3)])
-omd2 = omdict([(1,1), (2,2), (1,11), (2, 22), (3,3)])
-omd1.update([(1, '1'), (3, '3'), (1, '11')])
-omd2.updateall([(1, '1'), (3, '3'), (1, '11')])
-print(list(omd1.items()))         # prints [(2, 2), (2, 22), (1, '1'), (3, '3'), (1, '11')]
-print(list(omd2.iterallitems()))  # prints [(1, '1'), (2, 2), (1, '11'), (2, 22), (3, '3')]
+
+initial = [(1, 1), (2, 2), (1, 11), (2, 22), (3, 3)]
+omd1 = OrderedMultiDict(initial)
+omd2 = omdict(initial)
+updates = [(1, '1'), (1, '11')]
+omd1.update(updates)
+omd2.updateall(updates)
+print(list(omd1.items()))         # [(2, 2), (2, 22), (3, '3'), (1, '1'), (1, '11')]
+print(list(omd2.iterallitems()))  # [(1, '1'), (2, 2), (1, '11'), (2, 22), (3, '3')]
 ```
+
+## Differences between `OrderedMultiDict` and `DeOrderedMultiDict`:
+
+Both provide the same API, but have slightly different performance characteristics:
+
+- `OrderedMultiDict` is generally about 1.5x - 4x faster and uses a lot *less* memory per *unique* key. But method `.popfirstitem()` has linear performance characteristics O(n)
+- `DeOrderedMultiDict` is generally slower and uses a lot *more* memory per *unique* key. But method `.popfirstitem()` has constant performance characteristics O(1)
+
+
+Creating / iterating over dictionary with 500000 entries with all keys being different:
+
+|                                 | OrderedMultiDict |  DeOrderedMultiDict |    OrderedMultiDict <br>is faster: |
+|---------------------------------|-----------------:|--------------------:|-----------------------------------:|
+| create                          |         101.8 ms |            161.4 ms |                               1.6x |
+| copy                            |          51.9 ms |            146.8 ms |                               2.8x |
+| iterate over items              |           2.2 ms |             10.3 ms |                               4.6x |
+| iterate over unique keys        |          15.4 ms |             23.4 ms |                               1.5x |
+| pop first item until empty      |   **38.7 s (!)** |            194.9 ms |            &gt;190x  <i>slower</i> |
+| pop last item until empty       |         143.2 ms |            180.3 ms |                               1.3x |
 
 ## Examples
 
@@ -191,3 +211,11 @@ Installation is simple:
 ```
 $ pip install better_orderedmultidict
 ```
+
+
+## Changelog
+[CHANGES.md](./CHANGES.md)
+
+
+[omdict_LINK]:  https://github.com/gruns/orderedmultidict  "omdict git repository"
+[boltons_LINK]: https://github.com/mahmoud/boltons  "boltons git repository"
