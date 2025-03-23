@@ -214,7 +214,7 @@ $ pip install better_orderedmultidict
 
 
 ## Changelog
-[CHANGES.md](./CHANGES.md)
+See [CHANGES.md](./CHANGES.md).
 
 
 [omdict_LINK]:  https://github.com/gruns/orderedmultidict  "omdict git repository"
